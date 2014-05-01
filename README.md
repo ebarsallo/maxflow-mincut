@@ -19,7 +19,7 @@ Completed the fixpoints related to Graph definition.
 Added GraphExample in order to test fixpoints and properties using a example graph of 4 vertex.  Added attrib. flow to the Graph structure as a new attrib in vertex definition (VerName * Weight * Flow). Adjusted definitions according to changes made.
 
 #####04/30/2014 
-Changes list fixpoint from Prop to bool. Do adjustment in Graph Properties and lemma.
+Changes list fixpoint from Prop to bool. Did some adjustment in Graph Properties and lemma.
 
 ####TODO:
 Prove theorems: exists_max_flox and flow_conservation_path.
