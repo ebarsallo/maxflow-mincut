@@ -250,11 +250,25 @@ Fixpoint beq_internal_vertex (grph :graph) (vn :VerName) : bool :=
       if andb (negb (beq_VerName src vn)) (negb (beq_VerName snk vn)) then true else false
   end.
 
+(** [graph_list]: returns the list of [vertex] of a graph *)
 Definition graph_list (grph :graph) : list vertex :=
   match grph with 
     | pair (pair vls src) snk => vls
   end.
 
+Definition graph_vsource (grph :graph) :VerName :=
+  match grph with
+    | pair (pair vls src) snk => src
+  end.
+
+Definition graph_vsink (grph :graph) :VerName :=
+  match grph with
+    | pair (pair vls src) snk => snk
+  end.
+
+(** [beq_vertex]: compares two vertex. Returns [true] if the vertex are equal,
+    [false] otherwise. Probably this functions is redundant sinces there is
+    [eq_vertex_dec]. *)
 Definition beq_vertex (v1 v2: vertex) : bool :=
   match v1 with
     | v_cons vn1 vlist1 => 
@@ -262,6 +276,85 @@ Definition beq_vertex (v1 v2: vertex) : bool :=
         | v_cons vn2 vlist2 => beq_VerName vn1 vn2
       end 
   end.
+
+
+Fixpoint list_path (vn :VerName) (vls :list VerName) : 
+  list (VerName * VerName) :=
+
+  match vls with 
+    | nil => nil
+    | xs :: ls => (vn, xs) :: list_path xs ls
+  end.
+
+Fixpoint list_path_weight (grph :graph) (cur :vertex) (vls :list VerName) :
+  nat :=
+ 
+  match vls with 
+    | nil => 0
+    | xs :: ls => 
+      match cur with
+        | v_cons vn vadjl =>
+            match edge_weight grph vn xs with
+              | None => 0 + list_path_weight grph (v_cons xs nil) ls
+              | Some w => w + list_path_weight grph (v_cons xs nil) ls
+            end
+      end
+  end.
+
+
+(* ###################################################### *)
+(** * Decidable Equivalence *)
+
+(** Vertex Names *)
+Lemma eq_VerName_dec : 
+  forall vn1 vn2 :VerName, {vn1 = vn2} + {vn1 <> vn2}.
+Proof.
+  intros vn1 vn2.
+  destruct vn1 as [n1]. destruct vn2 as [n2].
+  destruct (eq_nat_dec n1 n2) as [Heq | Hneq].
+  Case "n1 = n2".
+    left. rewrite Heq. reflexivity.
+  Case "n1 <> n2".
+    right. intros contra. inversion contra. apply Hneq. apply H0.
+Qed.
+
+(** Adjacence (VerName * Weight * Flow)  *)
+Lemma eq_adjacence_dec : 
+  forall vls1 vls2 :adjacence, {vls1 = vls2} + {vls1 <> vls2}.
+Proof.
+  intros vls1 vls2.
+  destruct vls1 as [p1 f1]. destruct vls2 as [p2 f2].
+  destruct p1 as [vn1 w1].  destruct p2 as [vn2 w2].
+  destruct (eq_VerName_dec vn1 vn2) as [Heq | Hneq].
+    destruct (eq_nat_dec w1 w2) as [HWeq | HWneq];
+    destruct (eq_nat_dec f1 f2) as [HFeq | HFneq];
+      try (left; subst; reflexivity);
+      try (right; intros contra; inversion contra; auto).
+  right. intros contra. inversion contra. auto.
+Qed.
+
+(** list of Adjacence *)
+Lemma eq_ladj_dec : 
+  forall ls1 ls2 :list adjacence, {ls1 = ls2} + {ls1 <> ls2}.
+Proof.
+  intros ls1 ls2.
+  apply list_eq_dec.
+  apply eq_adjacence_dec.
+Qed.
+
+(** Vertex *)
+Lemma eq_vertex_dec : 
+  forall v1 v2 :vertex, {v1 = v2} + {v1 <> v2}.
+Proof.
+  intros v1 v2.
+  destruct v1 as [vn1 ls1]. destruct v2 as [vn2 ls2].
+  destruct (eq_VerName_dec vn1 vn2) as [Heq | Hneq].
+  destruct (eq_ladj_dec ls1 ls2) as [Hleq | Hlneq];
+      try (left; subst; reflexivity);
+      try (right; intros contra; inversion contra; auto).
+  try (right; intros contra; inversion contra; auto).
+Qed.
+
 
 (* ###################################################### *)
 (** * Lists extended functions *)
@@ -302,6 +395,14 @@ Inductive NoRep {A :Type}: list A -> Prop :=
     | NoRep_cons : forall (x :A) (l: list A) (f :A->A->bool), 
          In x l f = false -> NoRep l -> NoRep (x::l).
 
+Inductive appears_in {X :Type} (a:X) : list X -> Prop :=
+    appears_here : forall l, appears_in a (a :: l)
+  | appears_cons : forall b l, appears_in a l -> appears_in a (b :: l).
+
+Inductive no_repeat {X :Type} : list X -> Prop :=
+    nr_nil  : no_repeat []
+  | nr_cons : forall a l, no_repeat l -> ~ (appears_in a l) -> no_repeat (a :: l).
+
 
 (* ###################################################### *)
 (** * Direct Graph: Properties, Lemmas and Theorems *)
@@ -331,7 +432,8 @@ Inductive graph_well_formed : graph -> Prop :=
                    vertex_lookup grph vn = Some v ->
                    {vls = (graph_list grph)} + {vls <> (graph_list grph)} ->
                    In v vls beq_vertex = true ->
-                   NoRep vls ->
+                   (* NoRep vls -> *)
+                   no_repeat vls ->
                    graph_well_formed grph
   | vtx_source : forall (vsrc:VerName) (grph:graph) w v vls,
                    vertex_lookup grph vsrc = Some v->
@@ -363,9 +465,15 @@ Inductive graph_well_formed : graph -> Prop :=
     (weight), such as:
  	forall (u, v) \in E , f(u,v) <= c(u,v)  *)
 
-Axiom capacity_constraint : forall (a:adjacence) n c f, 
-                        a = (n,c,f) -> 
+Axiom capacity_constraint : forall (a:adjacence) vn c f, 
+                        a = (vn,c,f) -> 
                         f <= c.
+
+Axiom capacity_constraint' :
+  forall (g :graph) vn1 vn2 c f,
+    edge_weight g vn1 vn2 = Some c ->
+    edge_flow g vn1 vn2 = Some f ->
+    f <= c.
 
 (** [flow conservation]: The sum of all the flow that enters ("consumes") a 
     vertex [v], such as [v] is not the source (s) or sink (t) vertex, is equal 
@@ -388,9 +496,36 @@ Axiom  flow_conservation: forall (grph :graph) (vn :VerName),
 
 (** _Theorem_ [exists_max_flox]: forall graph [G], there is always a max-flow. 
      Use: excluded middle and prove by contradiction *)
-
+(*
+Theorem exist_max_flow :
+  exists p, p
+Proof.
+*)
 (** _Theorem_ [flow_conservation_path]: forall path in graph [G], a path [p1] and [p2] such as [p2] \in [p1]
      then flow ([p2]) < capacity [p2] and flow ([p1]) >=  flow([p2]). *)
+
+Lemma t1 : forall grph cur vls w w',
+  path_weight grph cur vls = Some w ->
+  list_path_weight grph cur vls = w' ->
+  w = w'.
+Proof.
+  intros. inversion H.
+  induction w.
+    destruct w'.
+    reflexivity.
+    inversion H0. unfold list_path_weight.
+    Abort.
+
+
+Theorem flow_conservation_path :
+  forall (g :graph) lvn lvn' v v' f f',
+    In_Set lvn' lvn beq_VerName = true ->
+    path_flow g v lvn = Some f ->
+    path_flow g v' lvn' = Some f' ->
+    f <= f'.
+Proof.
+  intros. 
+  Abort.
 
 (** 
     Maybe?   
